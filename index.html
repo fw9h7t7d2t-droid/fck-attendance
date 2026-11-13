@@ -135,6 +135,10 @@ td.warn{color:var(--red);font-weight:700}
 .rnum{display:flex;align-items:center;gap:14px}
 .rnum button{width:40px;height:40px;border-radius:50%;border:0;background:var(--soft);color:var(--g);font-size:22px;font-weight:700}
 .rnum b{font-size:24px;min-width:3.4em;text-align:center}.rnum small{font-size:13px;margin-left:2px}
+.memo{margin-top:8px;background:#f7f6ef;border-left:3px solid var(--gold);border-radius:6px;padding:8px 10px;font-size:13px;line-height:1.6;white-space:pre-wrap;word-break:break-word;color:#3a3f3b}
+.memo .ml{display:inline-block;font-size:10px;font-weight:800;color:var(--goldd);margin-right:6px;letter-spacing:.1em}
+.memo .mmore{display:block;color:var(--g);font-weight:700;font-size:12px;margin-top:2px}
+.memo a{color:var(--g)}
 .copybox{width:100%;min-height:160px;margin-top:10px;font-size:13px}
 </style>
 </head>
@@ -213,6 +217,24 @@ function toast(msg) {
 }
 // 「くわしく」は本人とコーチだけに見せる
 const noteOk = r => !!r.note && (!!coachPin || r.player === me);
+// カレンダーの「説明」欄（メモ）。長いときはタップで全文
+let openMemo = {};
+const linkify = t => t.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener">$1</a>');
+function cleanMemo(t) {
+  return String(t || '').replace(/\n*【出欠連絡】[\s\S]*?【\/出欠連絡】/, '')
+    .replace(/<br\s*\/?>/gi, '\n').replace(/<\/(p|div|li)>/gi, '\n').replace(/<li>/gi, '・').replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&')
+    .replace(/\n{3,}/g, '\n\n').trim().slice(0, 1500);
+}
+function memoHtml(e) {
+  e = Object.assign({}, e, { memo: cleanMemo(e.memo) });
+  if (!e.memo) return '';
+  const long = e.memo.length > 70 || e.memo.split('\n').length > 3;
+  const open = !long || openMemo[e.key];
+  let txt = e.memo;
+  if (!open) { const ls = txt.split('\n').slice(0, 3); txt = ls.join('\n'); if (txt.length > 70) txt = txt.slice(0, 70); txt += '…'; }
+  return `<div class="memo" ${long ? `data-act="memo" data-key="${esc(e.key)}"` : ''}><span class="ml">メモ</span>${linkify(esc(txt))}${long ? `<span class="mmore">${open ? '閉じる ▲' : '続きを見る ▼'}</span>` : ''}</div>`;
+}
 const repLine = r => r.type === '遅刻' ? `遅刻 ${r.late}分` : '欠席';
 
 /* ---------- 通信 ---------- */
@@ -272,7 +294,7 @@ function viewReport() {
     return `<div class="card">
       <div class="evd"><b>${fmtDay(e.start)}</b><span>${evTime(e)}</span></div>
       <div class="evt">${esc(e.title)}${catTag(e)}</div>
-      ${e.location ? `<div class="mut">📍 ${esc(e.location)}</div>` : ''}
+      ${e.location ? `<div class="mut">📍 ${esc(e.location)}</div>` : ''}${memoHtml(e)}
       ${r ? `<div class="status ${r.type === '欠席' ? 'abs' : 'late'}"><b>${repLine(r)}</b>：${esc(r.reason)}${noteOk(r) ? `（${esc(r.note)}）` : ''}<br><span style="font-size:12px">${runText(r.runs, r.distance)}</span></div>
         <div class="row2"><button class="btn ghost" data-act="open" data-key="${esc(e.key)}">修正</button><button class="btn red" data-act="cancel" data-id="${esc(r.id)}">取り消す</button></div>`
         : `<button class="btn" data-act="open" data-key="${esc(e.key)}">欠席・遅刻を連絡</button>`}
@@ -286,6 +308,7 @@ function eventCard(e) {
   return `<div class="card ${isPast(e) ? 'past' : ''}">
     <div class="evd"><b>${fmtDay(e.start)}</b><span>${evTime(e)}</span></div>
     <div class="evt">${esc(e.title)}${catTag(e)}</div>
+    ${e.location ? `<div class="mut">📍 ${esc(e.location)}</div>` : ''}${memoHtml(e)}
     <div style="margin-top:6px"><span class="badge abs">欠席 ${abs}</span><span class="badge late">遅刻 ${late}</span><span class="badge ok">参加予定 ${Math.max(S.players.filter(p => evFor(e, catOf(p))).length - abs, 0)}</span></div>
     ${rs.length ? `<div class="plist">${rs.map(r => `<div class="prow"><span class="nm">${esc(r.player)}</span><span class="badge ${r.type === '欠席' ? 'abs' : 'late'}">${repLine(r)}</span><span class="rs">${esc(r.reason)}${noteOk(r) ? `・${esc(r.note)}` : ''}</span></div>`).join('')}</div>` : ''}
     ${coachPin ? `<button class="btn ghost" data-act="open" data-key="${esc(e.key)}" data-coach="1">＋ 記録を追加（コーチ）</button>` : ''}
@@ -554,6 +577,7 @@ document.addEventListener('click', async ev => {
       const j = await api('saveRules', { cat: c, rules: ruleDraft[c], pin: coachPin });
       S.rules = j.rules; delete ruleDraft[c]; render(); return toast(`${c} のルールを保存しました`);
     }
+    if (a === 'memo') { if (ev.target.closest('a')) return; openMemo[b.dataset.key] = !openMemo[b.dataset.key]; return render(); }
     if (a === 'cat') { cat = b.dataset.v; openPlayer = null; return render(); }
     if (a === 'smode') { statMode = b.dataset.v; return render(); }
     if (a === 'ssort') { statSort = b.dataset.v; return render(); }
@@ -615,8 +639,10 @@ function seedDemo() {
     if (w === 0 && i % 2 === 0) add(d, 'U14 トレーニングマッチ', [0, 9, 0, 15, 0, '市総合運動公園'], ['U14']);
     if (w === 0 && i % 4 === 1) add(d, 'U13 リーグ戦', [0, 9, 0, 14, 0, '市総合運動公園'], ['U13']);
   }
+  const memos = ['集合 18:45\n持ち物：ボール・すね当て・水筒', '雨天時は体育館（連絡はLINEで流します）', '対戦相手：○○FC\n集合 8:00 現地\nユニフォーム：緑（1st）\n昼食持参\n駐車場はありません。乗り合わせでお願いします。\n詳細 https://example.com'];
   const nextSun = new Date(t0); nextSun.setDate(t0.getDate() + ((7 - t0.getDay()) % 7 || 7) + 7);
   add(nextSun, 'クラブ全体ミーティング', [0, 16, 0, 17, 0, 'クラブハウス'], categories.slice());
+  events.filter(e => !isPast(e)).forEach((e, i) => { if (i % 3 === 0) e.memo = memos[(i / 3) % memos.length]; });
   const rules = {
     U13: { distance: 200, absentRuns: 5, lateMinutesPerRun: 15, exemptReasons: ['体調不良・けが'] },
     U14: { distance: 300, absentRuns: 10, lateMinutesPerRun: 10, exemptReasons: [] },
